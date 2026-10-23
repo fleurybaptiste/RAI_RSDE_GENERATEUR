@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Etape 1 : transforme une extraction brute de labo (+ tables de correspondance
 Ianesco) en fichier "a plat" (onglet Resultats) pret pour l'etape 2
@@ -8,7 +8,7 @@ Gere des "profils de station" (SIRET, ouvrage, dates par defaut...) que l'on
 sauvegarde/recharge d'une campagne a l'autre, pour n'importe quel client.
 """
 
-__version__ = "4.1.0"
+__version__ = "4.2.0"
 import os
 import re
 import sys
@@ -52,7 +52,7 @@ CODE_PRODUIT_TO_FRACTION_LABEL = {
     "ER": "Eau brute",
     "ER_MOYEN_24H": "Eau brute",
     "ER_ICPE": "Eau brute",
-    "ER_FILTRAT": "Phase aqueuse de l'eau (filtrée, centrifugée...)",
+    "ER_FILTRAT": "Phase aqueuse de l'eau (filtrÃ©e, centrifugÃ©e...)",
     "ER_MES": "Phase particulaire de l'eau",
 }
 
@@ -141,7 +141,7 @@ def parse_resultat(raw):
     if raw is None or str(raw).strip() == "":
         return "", "0", None
     txt = str(raw).strip()
-    if " " in txt and ("°" in txt or " a " in txt.lower() or " à " in txt.lower()):
+    if " " in txt and ("Â°" in txt or " a " in txt.lower() or " Ã  " in txt.lower()):
         m = re.match(r"^([0-9]+(?:[.,][0-9]+)?)", txt)
         if m:
             return m.group(1).replace(",", "."), "1", f"Valeur brute labo : {txt}"
@@ -258,7 +258,7 @@ def save_profile(data):
     name = data["nom_profil"].strip()
     if not name:
         raise ValueError("Le profil doit avoir un nom.")
-    safe = re.sub(r"[^A-Za-z0-9_\-À-ſ ]", "_", name)
+    safe = re.sub(r"[^A-Za-z0-9_\-Ã€-Å¿ ]", "_", name)
     path = os.path.join(PROFILES_DIR, safe + ".json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -506,7 +506,7 @@ def run_generation(extraction_path, parametres_path, unites_path, fractions_path
     # plutot que de bloquer toute la generation.
     optional_cols = ["Analyse_Denomination", "Unite", "Date_Fin_Examen", "LimiteQ",
                       "Incertitude", "Cofrac_analyse", "CODE_Produit", "heure_rcpt",
-                      "Date_rcpt", "CODE_METHODE", "ID_ECHANT"]
+                      "Date_rcpt", "CODE_METHODE", "ID_ECHANT", "DateDepot"]
     missing_optional = [c for c in optional_cols if c not in idx]
     if missing_optional:
         log(f"/!\\ Colonnes absentes de l'extraction (poursuite avec champs vides) : {', '.join(missing_optional)}")
@@ -649,25 +649,35 @@ def run_generation(extraction_path, parametres_path, unites_path, fractions_path
         if incertitude_pct is None:
             issues.append((r, "IncertAna", f"Incertitude manquante pour parametre {cd_parametre}"))
 
-        # Reception de l'echantillon : quand l'extraction ne porte pas heure_rcpt/
-        # Date_rcpt (cas frequent en RSDE), convention labo : la reception a lieu
-        # le jour meme de la date de prelevement, a 11h00.
-        date_rcpt = fmt_date(g(r, "Date_rcpt"))
-        heure_rcpt = fmt_heure(g(r, "heure_rcpt"))
-        if (date_rcpt == "" or heure_rcpt == "") and profile.get("finalite_analyse", "11") == "11":
-            if date_rcpt == "":
-                date_rcpt = fmt_date(g(r, "DatePrelv"))
-            if heure_rcpt == "":
-                heure_rcpt = "11:00:00"
-            issues.append((r, "Reception auto", "DateReceptionEchantillon/HeureReceptionEchantillon absentes de l'extraction, completees par convention RSDE (jour du prelevement, 11h00)"))
+        # DateDepot (colonne AC) : date + heure de depot au labo = reception ET analyse.
+        # Prioritaire sur les anciennes colonnes Date_rcpt/heure_rcpt/Date_Fin_Examen.
+        date_depot_val = g(r, "DateDepot")
+        date_rcpt     = fmt_date(date_depot_val)
+        heure_rcpt    = fmt_heure(date_depot_val)
+        date_analyse  = fmt_date(date_depot_val)
+        heure_analyse = fmt_heure(date_depot_val)
 
-        # Date d'analyse : souvent omise par les operateurs a la saisie. Convention :
-        # prelevement et analyse ont lieu le meme jour, donc on reprend DatePrelv.
-        date_analyse = fmt_date(g(r, "Date_Fin_Examen"))
+        # Fallback si DateDepot absent : anciennes colonnes puis convention 11h00
+        if date_rcpt == "" or heure_rcpt == "":
+            if date_rcpt == "":
+                date_rcpt = fmt_date(g(r, "Date_rcpt"))
+            if heure_rcpt == "":
+                heure_rcpt = fmt_heure(g(r, "heure_rcpt"))
+            if (date_rcpt == "" or heure_rcpt == "") and profile.get("finalite_analyse", "11") == "11":
+                if date_rcpt == "":
+                    date_rcpt = fmt_date(g(r, "DatePrelv"))
+                if heure_rcpt == "":
+                    heure_rcpt = "11:00:00"
+                issues.append((r, "Reception auto", "DateDepot absent, completee par convention RSDE (jour du prelevement, 11h00)"))
+
         if date_analyse == "":
-            date_analyse = fmt_date(g(r, "DatePrelv"))
-            if date_analyse != "":
-                issues.append((r, "DateAnalyse auto", "Date_Fin_Examen absente de l'extraction (oubli operateur), completee avec la date de prelevement (meme jour)"))
+            date_analyse = fmt_date(g(r, "Date_Fin_Examen"))
+            heure_analyse = ""
+            if date_analyse == "":
+                date_analyse = fmt_date(g(r, "DatePrelv"))
+                heure_analyse = ""
+                if date_analyse != "":
+                    issues.append((r, "DateAnalyse auto", "DateDepot et Date_Fin_Examen absents, completee avec DatePrelv"))
 
         # A4.81 : si resultat < LQ et code remarque = 1 (valeur certifiee), corriger
         # automatiquement en 10 (valeur < LQ, non certifiee) pour eviter le rejet SANDRE
@@ -706,7 +716,7 @@ def run_generation(extraction_path, parametres_path, unites_path, fractions_path
             "AccrePrlvt": accre, "CdSupport": cd_support,
             "DateReceptionEchantillon": date_rcpt,
             "HeureReceptionEchantillon": heure_rcpt,
-            "DateAnalyse": date_analyse, "HeureAnalyse": "",
+            "DateAnalyse": date_analyse, "HeureAnalyse": heure_analyse,
             "CdParametre": cd_parametre, "RsAnalyse": rs_analyse,
             "CdUniteMesure": cd_unite_final, "CdRemAnalyse": cd_rem,
             "InSituAnalyse": in_situ,
@@ -1013,14 +1023,14 @@ class ProfileDialog(tk.Toplevel):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("SANDRE - Etape 1 : extraction brute -> fichier à plat")
+        root.title("SANDRE - Etape 1 : extraction brute -> fichier Ã  plat")
         root.geometry("820x640")
         root.minsize(700, 500)
 
         self.paths = {
             "extraction": tk.StringVar(),
             "parametres": tk.StringVar(value=os.path.join(app_dir(), "Parametres.xlsx")),
-            "unites": tk.StringVar(value=os.path.join(app_dir(), "Unités.xlsx")),
+            "unites": tk.StringVar(value=os.path.join(app_dir(), "UnitÃ©s.xlsx")),
             "fractions": tk.StringVar(value=os.path.join(app_dir(), "Fractions.xlsx")),
             "methodes": tk.StringVar(value=os.path.join(app_dir(), "Methodes.xlsx")),
             "referentiel": tk.StringVar(value=os.path.join(app_dir(), "LQ_Incertitude.xlsx")),
@@ -1037,8 +1047,8 @@ class App:
         self._file_row(files_frame, 2, "Unites.xlsx", "unites")
         self._file_row(files_frame, 3, "Fractions.xlsx", "fractions")
         self._file_row(files_frame, 4, "Methodes.xlsx", "methodes")
-        self._file_row(files_frame, 5, "Référentiel LQ/Incertitude (optionnel)", "referentiel")
-        self._file_row(files_frame, 6, "Référence multi-stations (optionnel)", "points_stations")
+        self._file_row(files_frame, 5, "RÃ©fÃ©rentiel LQ/Incertitude (optionnel)", "referentiel")
+        self._file_row(files_frame, 6, "RÃ©fÃ©rence multi-stations (optionnel)", "points_stations")
 
         prof_frame = ttk.LabelFrame(root, text="Station")
         prof_frame.pack(fill="x", padx=10, pady=8)
@@ -1049,16 +1059,16 @@ class App:
         ttk.Button(prof_frame, text="Modifier...", command=self.edit_profile).grid(row=0, column=3, padx=4)
         ttk.Button(prof_frame, text="Actualiser", command=self.refresh_profiles).grid(row=0, column=4, padx=4)
 
-        ttk.Label(prof_frame, text="Date début période (AAAA-MM-JJ) :").grid(row=1, column=0, padx=8, pady=6, sticky="w")
+        ttk.Label(prof_frame, text="Date dÃ©but pÃ©riode (AAAA-MM-JJ) :").grid(row=1, column=0, padx=8, pady=6, sticky="w")
         ttk.Entry(prof_frame, textvariable=self.date_debut, width=16).grid(row=1, column=1, padx=8, pady=6, sticky="w")
-        ttk.Label(prof_frame, text="Date fin période (AAAA-MM-JJ) :").grid(row=1, column=2, padx=8, pady=6, sticky="w")
+        ttk.Label(prof_frame, text="Date fin pÃ©riode (AAAA-MM-JJ) :").grid(row=1, column=2, padx=8, pady=6, sticky="w")
         ttk.Entry(prof_frame, textvariable=self.date_fin, width=16).grid(row=1, column=3, padx=8, pady=6, sticky="w")
 
         action = ttk.Frame(root)
         action.pack(fill="x", padx=10)
-        self.gen_btn = ttk.Button(action, text="Générer le fichier à plat", command=self.on_generate)
+        self.gen_btn = ttk.Button(action, text="GÃ©nÃ©rer le fichier Ã  plat", command=self.on_generate)
         self.gen_btn.pack(side="left")
-        self.open_folder_btn = ttk.Button(action, text="Ouvrir le dossier du résultat",
+        self.open_folder_btn = ttk.Button(action, text="Ouvrir le dossier du rÃ©sultat",
                                            command=self.open_folder, state="disabled")
         self.open_folder_btn.pack(side="left", padx=(8, 0))
 
@@ -1130,21 +1140,21 @@ class App:
                 messagebox.showerror("Fichier manquant", f"Fichier introuvable : {label}\n{p}", parent=self.root)
                 return
         if referentiel and not os.path.isfile(referentiel):
-            messagebox.showerror("Fichier manquant", f"Fichier introuvable : Référentiel LQ/Incertitude\n{referentiel}", parent=self.root)
+            messagebox.showerror("Fichier manquant", f"Fichier introuvable : RÃ©fÃ©rentiel LQ/Incertitude\n{referentiel}", parent=self.root)
             return
         if points_stations and not os.path.isfile(points_stations):
-            messagebox.showerror("Fichier manquant", f"Fichier introuvable : Référence multi-stations\n{points_stations}", parent=self.root)
+            messagebox.showerror("Fichier manquant", f"Fichier introuvable : RÃ©fÃ©rence multi-stations\n{points_stations}", parent=self.root)
             return
         if not self.profile_var.get():
-            messagebox.showwarning("Profil manquant", "Choisissez ou créez un profil de station.", parent=self.root)
+            messagebox.showwarning("Profil manquant", "Choisissez ou crÃ©ez un profil de station.", parent=self.root)
             return
         if not self.date_debut.get().strip() or not self.date_fin.get().strip():
-            messagebox.showwarning("Dates manquantes", "Renseignez les dates de début et de fin de période.", parent=self.root)
+            messagebox.showwarning("Dates manquantes", "Renseignez les dates de dÃ©but et de fin de pÃ©riode.", parent=self.root)
             return
 
         self.gen_btn.configure(state="disabled")
         self.open_folder_btn.configure(state="disabled")
-        self.status_var.set("Génération en cours...")
+        self.status_var.set("GÃ©nÃ©ration en cours...")
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
@@ -1194,16 +1204,16 @@ class App:
             out_xlsx, out_issues, out_completer, nb_issues = result
             self.last_output_dir = os.path.dirname(out_xlsx)
             self.open_folder_btn.configure(state="normal")
-            self.status_var.set(f"Terminé : {out_xlsx} ({nb_issues} point(s) à vérifier)")
-            msg = f"Fichier généré :\n{out_xlsx}"
+            self.status_var.set(f"TerminÃ© : {out_xlsx} ({nb_issues} point(s) Ã  vÃ©rifier)")
+            msg = f"Fichier gÃ©nÃ©rÃ© :\n{out_xlsx}"
             if out_issues:
-                msg += f"\n\n{nb_issues} point(s) à vérifier :\n{out_issues}"
+                msg += f"\n\n{nb_issues} point(s) Ã  vÃ©rifier :\n{out_issues}"
             if out_completer:
-                msg += f"\n\nLQ/Incertitude manquantes à faire compléter par le labo :\n{out_completer}"
-            messagebox.showinfo("Terminé", msg, parent=self.root)
+                msg += f"\n\nLQ/Incertitude manquantes Ã  faire complÃ©ter par le labo :\n{out_completer}"
+            messagebox.showinfo("TerminÃ©", msg, parent=self.root)
         else:
-            self.status_var.set("Échec, voir le journal.")
-            messagebox.showerror("Erreur", "La génération a échoué, voir le détail dans la fenêtre.", parent=self.root)
+            self.status_var.set("Ã‰chec, voir le journal.")
+            messagebox.showerror("Erreur", "La gÃ©nÃ©ration a Ã©chouÃ©, voir le dÃ©tail dans la fenÃªtre.", parent=self.root)
 
 
 def main():
