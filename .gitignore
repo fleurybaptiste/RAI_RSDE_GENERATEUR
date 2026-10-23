@@ -1,10 +1,9 @@
 # Binaire compilé (généré par PyInstaller, ne pas versionner)
 *.exe
 
-# Artifacts PyInstaller
+# Artifacts PyInstaller (le .spec est versionné — c'est la recette de compilation)
 build/
 dist/
-*.spec
 
 # Python
 __pycache__/
