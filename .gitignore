@@ -1,0 +1,19 @@
+# Binaire compilé (généré par PyInstaller, ne pas versionner)
+*.exe
+
+# Artifacts PyInstaller
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs runtime
+logs/
+
+# Fichiers temporaires Windows
+Thumbs.db
+desktop.ini
